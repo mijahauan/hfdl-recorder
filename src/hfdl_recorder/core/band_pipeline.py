@@ -225,7 +225,7 @@ class BandPipeline:
 
     # -- ka9q-python callbacks (called from MultiStream worker thread) --
 
-    def _on_samples(self, samples) -> None:
+    def _on_samples(self, samples, quality=None) -> None:
         with self._proc_lock:
             proc = self._proc
             if proc is None or proc.poll() is not None or proc.stdin is None:
