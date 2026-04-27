@@ -1,0 +1,109 @@
+#!/bin/bash
+# deploy.sh — Pattern A editable-install refresh for hfdl-recorder
+#
+# Usage: sudo ./scripts/deploy.sh [--pull] [--no-restart] [--rebuild-dumphfdl]
+#
+# What it does:
+#   1. Verifies clean git tree (unless --force-dirty)
+#   2. Optional git pull --ff-only
+#   3. Traversability check: service user can read repo
+#   4. pip install -e . (refresh editable install)
+#   5. Optional: rebuild dumphfdl from source (--rebuild-dumphfdl)
+#   6. Reinstalls systemd unit (in case it changed)
+#   7. Restarts enabled hfdl-recorder@* instances
+#
+# Does NOT:
+#   - Create service user or venv (use install.sh for first-run)
+#   - Build dumphfdl by default (preserve binary across deploys)
+#   - Overwrite config
+
+set -euo pipefail
+
+SERVICE_USER="hfdlrec"
+REPO_SOURCE="/opt/git/hfdl-recorder"
+VENV_DIR="/opt/hfdl-recorder/venv"
+
+ui_info()  { echo "[INFO]  $*"; }
+ui_warn()  { echo "[WARN]  $*" >&2; }
+ui_error() { echo "[ERROR] $*" >&2; }
+
+DO_PULL=false
+DO_RESTART=true
+FORCE_DIRTY=false
+REBUILD_DUMPHFDL=false
+for arg in "$@"; do
+    case "$arg" in
+        --pull)              DO_PULL=true ;;
+        --no-restart)        DO_RESTART=false ;;
+        --force-dirty)       FORCE_DIRTY=true ;;
+        --rebuild-dumphfdl)  REBUILD_DUMPHFDL=true ;;
+    esac
+done
+
+if [[ $EUID -ne 0 ]]; then
+    ui_error "Must run as root (sudo)"
+    exit 1
+fi
+
+if [[ ! -d "$VENV_DIR" ]]; then
+    ui_error "Venv not found at $VENV_DIR — run install.sh first"
+    exit 1
+fi
+
+# Step 1: clean tree check
+if ! $FORCE_DIRTY; then
+    if [[ -n "$(git -C "$REPO_SOURCE" status --porcelain)" ]]; then
+        ui_error "Repo has uncommitted changes. Commit first or use --force-dirty"
+        exit 1
+    fi
+fi
+
+# Step 2: optional pull
+if $DO_PULL; then
+    ui_info "Pulling latest from origin"
+    git -C "$REPO_SOURCE" pull --ff-only
+fi
+
+# Step 3: traversability check
+if ! sudo -u "$SERVICE_USER" test -r "$REPO_SOURCE/src/hfdl_recorder/__init__.py"; then
+    ui_error "Service user $SERVICE_USER cannot read $REPO_SOURCE"
+    exit 1
+fi
+
+# Step 4: editable install refresh
+ui_info "Refreshing editable install"
+"$VENV_DIR/bin/pip" install -e "$REPO_SOURCE" >/dev/null
+
+# Post-install verify
+if ! sudo -u "$SERVICE_USER" "$VENV_DIR/bin/python3" -c 'import hfdl_recorder' 2>/dev/null; then
+    ui_error "Post-install verify failed"
+    exit 1
+fi
+ui_info "Post-install verify OK"
+
+# Step 5: optional dumphfdl rebuild
+if $REBUILD_DUMPHFDL; then
+    ui_info "Rebuilding dumphfdl"
+    "$REPO_SOURCE/scripts/build-dumphfdl.sh" --force
+fi
+
+# Step 6: install unit file (in case it changed)
+install -o root -g root -m 644 \
+    "$REPO_SOURCE/systemd/hfdl-recorder@.service" \
+    /etc/systemd/system/hfdl-recorder@.service
+systemctl daemon-reload
+
+# Step 7: restart instances
+if $DO_RESTART; then
+    INSTANCES=$(systemctl list-units --plain --no-legend 'hfdl-recorder@*.service' 2>/dev/null | awk '{print $1}')
+    if [[ -n "$INSTANCES" ]]; then
+        for unit in $INSTANCES; do
+            ui_info "Restarting $unit"
+            systemctl restart "$unit"
+        done
+    else
+        ui_info "No hfdl-recorder instances currently running"
+    fi
+fi
+
+ui_info "Deploy complete"

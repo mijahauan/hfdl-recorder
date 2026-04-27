@@ -1,0 +1,63 @@
+[package]
+name             = "hfdl-recorder"
+version          = "0.1.0"
+contract_version = "0.4"
+license          = "MIT"
+
+[build]
+steps = [
+    "python3 -m venv /opt/hfdl-recorder/venv",
+    "/opt/hfdl-recorder/venv/bin/pip install --upgrade pip setuptools wheel",
+    "/opt/hfdl-recorder/venv/bin/pip install -e /opt/git/hfdl-recorder",
+    "/opt/git/hfdl-recorder/scripts/build-dumphfdl.sh",
+]
+produces = [
+    "/opt/hfdl-recorder/venv/bin/hfdl-recorder",
+    "/opt/hfdl-recorder/bin/dumphfdl",
+]
+
+[[install.steps]]
+kind = "link"
+src  = "/opt/hfdl-recorder/venv/bin/hfdl-recorder"
+dst  = "/usr/local/bin/hfdl-recorder"
+
+[[install.steps]]
+kind = "link"
+src  = "systemd/hfdl-recorder@.service"
+dst  = "/etc/systemd/system/hfdl-recorder@.service"
+
+[[install.steps]]
+kind     = "render"
+src      = "config/hfdl-recorder-config.toml.template"
+dst      = "/etc/hfdl-recorder/hfdl-recorder-config.toml"
+if_absent = true
+
+[[install.steps]]
+kind = "mkdir"
+dst  = "/var/lib/hfdl-recorder"
+owner = "hfdlrec:hfdlrec"
+mode  = "0755"
+
+[[install.steps]]
+kind = "mkdir"
+dst  = "/var/log/hfdl-recorder"
+owner = "hfdlrec:hfdlrec"
+mode  = "0755"
+
+[systemd]
+units = ["hfdl-recorder@.service"]
+
+[deps]
+[[deps.binary]]
+name = "dumphfdl"
+note = "Built from source by scripts/build-dumphfdl.sh into /opt/hfdl-recorder/bin/"
+
+[[deps.git]]
+name = "ka9q-radio"
+url  = "https://github.com/ka9q/ka9q-radio.git"
+note = "provides radiod IQ multicast; HFDL fragment in config/fragments/hfdl.conf"
+
+[[deps.pypi]]
+name    = "ka9q-python"
+version = "3.8.0"
+venv    = "/opt/hfdl-recorder/venv"

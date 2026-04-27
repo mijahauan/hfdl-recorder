@@ -1,0 +1,22 @@
+# Fixture config for hfdl-recorder tests.
+
+[station]
+station_id  = "TEST-1"
+grid_square = "AA00aa"
+
+[paths]
+dumphfdl  = "/usr/bin/true"   # any executable so validate doesn't fail
+spool_dir = "/tmp/hfdl-recorder-test/spool"
+log_dir   = "/tmp/hfdl-recorder-test/log"
+systable  = "/tmp/hfdl-recorder-test/systable.conf"
+
+[sinks]
+local_json   = true
+airframes_io = false
+
+[[radiod]]
+id            = "test-rx888"
+radiod_status = "test-rx888-status.local"
+
+[radiod.bands]
+enabled = ["HFDL21", "HFDL13", "HFDL5"]
