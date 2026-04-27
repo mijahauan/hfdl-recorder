@@ -22,12 +22,16 @@ PREFIX="${HFDL_RECORDER_PREFIX:-/opt/hfdl-recorder}"
 BUILD_DIR="${HFDL_RECORDER_BUILD_DIR:-/var/cache/hfdl-recorder/build}"
 LIBACARS_URL="${LIBACARS_URL:-https://github.com/szpajder/libacars.git}"
 DUMPHFDL_URL="${DUMPHFDL_URL:-https://github.com/szpajder/dumphfdl.git}"
+LIQUIDDSP_URL="${LIQUIDDSP_URL:-https://github.com/jgaeddert/liquid-dsp.git}"
 LIBACARS_REF="${LIBACARS_REF:-master}"
 DUMPHFDL_REF="${DUMPHFDL_REF:-master}"
+LIQUIDDSP_REF="${LIQUIDDSP_REF:-master}"
 
 APT_DEPS=(
     build-essential cmake pkg-config git
+    autoconf automake libtool
     libxml2-dev libjansson-dev libsqlite3-dev libfftw3-dev
+    libglib2.0-dev libconfig++-dev
     libsoapysdr-dev libusb-1.0-0-dev zlib1g-dev
 )
 
@@ -119,19 +123,68 @@ build_one() {
     echo "$current_rev" > "$stamp"
 }
 
+build_autotools() {
+    # liquid-dsp ships autotools, not CMake. Mirrors build_one's stamp logic.
+    local name="$1" src="$2"
+    local stamp="$src/.installed-rev"
+    local current_rev
+    current_rev=$(git -C "$src" rev-parse HEAD)
+
+    if ! $FORCE && [[ -f "$stamp" ]] && [[ "$(cat "$stamp")" == "$current_rev" ]]; then
+        ui_info "$name @ $current_rev already installed; skipping (use --force to rebuild)"
+        return
+    fi
+
+    ui_info "Configuring $name (rev $current_rev)"
+    (
+        cd "$src"
+        if [[ ! -f configure ]]; then
+            ./bootstrap.sh >/dev/null
+        fi
+        # liquid-dsp's configure picks up CFLAGS for rpath if we set them.
+        ./configure --prefix="$PREFIX" \
+                    --libdir="$PREFIX/lib" \
+                    LDFLAGS="-Wl,-rpath,$PREFIX/lib" >/dev/null
+        ui_info "Building $name"
+        make -j"$(nproc)" >/dev/null
+        ui_info "Installing $name to $PREFIX"
+        make install >/dev/null
+        # liquid-dsp installs a static lib by default; ensure the shared lib
+        # is also present so dumphfdl's runtime link works.
+        if [[ ! -f "$PREFIX/lib/libliquid.so" ]] && [[ -f "$PREFIX/lib/libliquid.a" ]]; then
+            ui_warn "liquid-dsp installed only static lib; dumphfdl will link statically"
+        fi
+        # Upstream liquid.h (>= 1.7.0) declares functions taking va_list
+        # but doesn't #include <stdarg.h>. dumphfdl's CMake version-check
+        # try-compile fails as a result. Patch the installed header so
+        # any TU that includes liquid.h gets va_list.
+        local lhdr="$PREFIX/include/liquid/liquid.h"
+        if [[ -f "$lhdr" ]] && ! grep -q '^#include <stdarg.h>' "$lhdr"; then
+            ui_info "Patching $lhdr to add #include <stdarg.h>"
+            sed -i '/^#include <time.h>/a #include <stdarg.h>' "$lhdr"
+        fi
+    )
+    echo "$current_rev" > "$stamp"
+}
+
 main() {
     ensure_apt_deps
 
     mkdir -p "$BUILD_DIR" "$PREFIX/bin" "$PREFIX/lib"
 
     local libacars_src="$BUILD_DIR/libacars"
+    local liquiddsp_src="$BUILD_DIR/liquid-dsp"
     local dumphfdl_src="$BUILD_DIR/dumphfdl"
 
     clone_or_update "$LIBACARS_URL" "$LIBACARS_REF" "$libacars_src"
     build_one "libacars" "$libacars_src" ""
 
+    clone_or_update "$LIQUIDDSP_URL" "$LIQUIDDSP_REF" "$liquiddsp_src"
+    build_autotools "liquid-dsp" "$liquiddsp_src"
+
     clone_or_update "$DUMPHFDL_URL" "$DUMPHFDL_REF" "$dumphfdl_src"
-    # PKG_CONFIG_PATH lets dumphfdl's CMake find our freshly installed libacars
+    # PKG_CONFIG_PATH + CMAKE_PREFIX_PATH let dumphfdl's CMake find our
+    # freshly installed libacars (pkg-config) and liquid-dsp (FindLiquidDSP).
     PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" \
         build_one "dumphfdl" "$dumphfdl_src" \
         "-DCMAKE_PREFIX_PATH=$PREFIX"
