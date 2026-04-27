@@ -58,6 +58,8 @@ class BandPipeline:
         self._supervisor_thread: threading.Thread | None = None
         self._log_fd = None
         self._multi = None
+        self._first_sample_logged = False
+        self._bytes_written = 0
 
     @property
     def name(self) -> str:
@@ -226,13 +228,32 @@ class BandPipeline:
     # -- ka9q-python callbacks (called from MultiStream worker thread) --
 
     def _on_samples(self, samples, quality=None) -> None:
+        if not self._first_sample_logged:
+            try:
+                arr = np.asarray(samples)
+                flat = arr.view(np.float32) if arr.dtype == np.complex64 else arr
+                nan_frac = float(np.isnan(flat).sum()) / max(flat.size, 1)
+                finite = flat[np.isfinite(flat)]
+                peak = float(np.max(np.abs(finite))) if finite.size else 0.0
+                rms = float(np.sqrt(np.mean(finite ** 2))) if finite.size else 0.0
+                logger.info(
+                    "%s: first samples dtype=%s shape=%s nan_frac=%.3f finite_peak=%.4f finite_rms=%.4f first5=%s",
+                    self._band.name, arr.dtype, arr.shape, nan_frac, peak, rms,
+                    flat[:5].tolist(),
+                )
+            except Exception as e:
+                logger.warning("%s: first-sample debug failed: %s", self._band.name, e)
+            self._first_sample_logged = True
+
         with self._proc_lock:
             proc = self._proc
             if proc is None or proc.poll() is not None or proc.stdin is None:
                 return
             stdin = proc.stdin
         try:
-            stdin.write(_f32_iq_to_cs16(samples))
+            blob = _f32_iq_to_cs16(samples)
+            stdin.write(blob)
+            self._bytes_written += len(blob)
         except (BrokenPipeError, OSError) as e:
             # Subprocess is dying; supervisor will notice and restart.
             logger.debug("%s: write to dumphfdl failed: %s", self._band.name, e)
@@ -247,9 +268,10 @@ class BandPipeline:
 def _f32_iq_to_cs16(samples) -> bytes:
     """Convert float32 IQ (complex64 or interleaved float32) → CS16 bytes.
 
-    ka9q-python normalizes IQ samples to roughly [-1.0, +1.0]. We scale
-    by 32767 (not 32768) and clip to the int16 range to avoid overflow
-    on the +1.0 boundary.
+    ka9q-python delivers IQ in [-1.0, +1.0] (post f32le RTP parse). We
+    scale by 32767 and clip to the int16 range. ``np.nan_to_num`` zeros
+    out any NaN/Inf the resequencer may have inserted on a packet drop
+    so dumphfdl never sees a garbage sample.
     """
     arr = np.asarray(samples)
     if arr.dtype == np.complex64:
@@ -258,5 +280,6 @@ def _f32_iq_to_cs16(samples) -> bytes:
         flat = arr.astype(np.complex64).view(np.float32)
     else:
         flat = arr.astype(np.float32, copy=False).ravel()
+    flat = np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
     cs16 = np.clip(flat * 32767.0, -32768.0, 32767.0).astype(np.int16)
     return cs16.tobytes()

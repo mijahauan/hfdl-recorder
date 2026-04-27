@@ -20,9 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 HFDL_PRESET = "iq"
-# ka9q.Encoding.S16BE = 2 (matches the per-band ``encoding = s16be`` in
-# the radiod HFDL fragment).
-HFDL_ENCODING = 2
+# ka9q.Encoding.F32LE = 4. radiod can serve any encoding the operator
+# requests; the constraint here is that ka9q-python's IQ payload parser
+# (ka9q/stream.py::_parse_payload, the ``if is_iq:`` branch) hard-codes
+# np.float32 LE and does not honour the ``encoding`` parameter for IQ
+# channels. Asking for s16be IQ delivers raw big-endian bytes that
+# numpy reinterprets as float32 garbage (NaN, denormals, ±FLT_MAX).
+# Asking for F32LE matches ka9q-python's parser, so the on_samples
+# callback gets the clean unit-scaled IQ we need. Different
+# (freq, sample_rate, encoding) tuples produce different SSRCs, so
+# the s16be channels declared by the radiod HFDL fragment stay idle
+# and don't conflict with the F32LE ones we create on demand.
+HFDL_ENCODING = 4
 
 
 @dataclass(frozen=True)
