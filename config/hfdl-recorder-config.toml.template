@@ -2,7 +2,15 @@
 # See https://github.com/mijahauan/hfdl-recorder for documentation.
 
 [station]
-# Required: dumphfdl --station-id; also identifies feeds to aggregators.
+# dumphfdl --station-id; also identifies live feeds to aggregators.
+#
+# If you intend to push to airframes.io (sinks.airframes_io = true below),
+# this MUST match the station name you registered at https://app.airframes.io
+# — the server accepts the TCP connection regardless but silently drops
+# messages that don't match a registered station.  See README.md
+# "Feeding airframes.io" for the registration walkthrough.
+#
+# If you only write local JSON, any unique string works (e.g. your callsign).
 station_id  = "YOURCALL-1"
 grid_square = "AA00aa"
 

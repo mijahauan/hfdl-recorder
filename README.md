@@ -99,9 +99,55 @@ sudo systemctl start hfdl-recorder@<radiod-id>
 tail -f /var/lib/hfdl-recorder/<radiod-id>/HFDL13.json
 ```
 
-To enable the airframes.io feed, set `sinks.airframes_io = true` and
-ensure `station.station_id` is set; the daemon's next start will add
-the airframes.io TCP output to every band's dumphfdl argv.
+## Feeding airframes.io
+
+[Airframes](https://app.airframes.io) is the de-facto aggregator for
+crowdsourced HFDL traffic. The live feed is identified by a **station
+name that you register on their site** — your amateur callsign alone is
+not the right value. Sending feeds with an unregistered or mismatched
+`station_id` will silently fail (the server accepts the TCP connection
+but discards the messages).
+
+Setup:
+
+1. **Create an account** at <https://app.airframes.io>.
+2. **Register a station** under your account; choose a station name
+   (e.g. `MH-KCOU-HFDL` — the convention is `<initials>-<nearest-airport>-HFDL`,
+   but anything unique under your account works) and set the software
+   to `HFDL-DUMPHFDL` (the protocol Airframes expects on port 5556).
+3. **Edit the config**:
+
+   ```toml
+   [station]
+   station_id = "MH-KCOU-HFDL"   # MUST match what you registered
+
+   [sinks]
+   airframes_io = true            # enables the TCP push to feed.airframes.io:5556
+   ```
+4. **Validate and restart**:
+
+   ```bash
+   sudo -u hfdlrec hfdl-recorder validate --json | jq .ok    # → true
+   sudo systemctl restart hfdl-recorder@<radiod-id>
+   ```
+5. **Verify the live TCP feed**:
+
+   ```bash
+   sudo ss -tnp | grep feed.airframes.io
+   # expect ESTAB connections, one per enabled band
+   tail -f /var/log/hfdl-recorder/<radiod-id>-HFDL13.log
+   # expect "output_tcp(feed.airframes.io:5556): connection established"
+   ```
+6. **Watch the dashboard** at `https://app.airframes.io/stations/<your-station-name>`.
+   Decodes show up within ~15 minutes once the antenna picks up
+   traffic. If your station page stays empty for an extended period
+   despite an `ESTAB` socket, double-check that `station_id` exactly
+   matches the registered name (it's case-sensitive).
+
+The Airframes web UI also offers an installer token (`bash <(curl ...) --token …`)
+— that's their bundled installer for stations not running ka9q-radio
+already, and is **not needed here**. Our daemon talks to airframes
+directly via dumphfdl's own `--output decoded:json:tcp:…` sink.
 
 ## Documentation
 
