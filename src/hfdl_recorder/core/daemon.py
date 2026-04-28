@@ -82,7 +82,21 @@ class HfdlRecorder:
                 frequency_hz=float(band.center_hz),
                 preset=HFDL_PRESET,
                 sample_rate=band.samprate_hz,
+                agc_enable=0,
+                gain=0.0,
                 encoding=HFDL_ENCODING,
+            )
+            # The "iq" preset's default channel filter is ±5 kHz — sized
+            # for narrowband audio, not an HFDL band. Without this call,
+            # radiod resamples a 10 kHz slice of spectrum up to the band
+            # samprate and ground stations outside ±5 kHz of center are
+            # lost. Set the filter to span the full band Nyquist with a
+            # small guard for the channelizer transition.
+            guard_hz = 1500
+            self._control.set_filter(
+                ssrc=info.ssrc,
+                low_edge=-band.samprate_hz / 2 + guard_hz,
+                high_edge=+band.samprate_hz / 2 - guard_hz,
             )
             key = (info.multicast_address, info.port)
             multi = multi_by_group.get(key)

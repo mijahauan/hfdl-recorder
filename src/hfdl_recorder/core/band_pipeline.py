@@ -1,11 +1,11 @@
-"""Per-band pipeline: ka9q-python subscription → CS16 → dumphfdl subprocess.
+"""Per-band pipeline: ka9q-python subscription → CF32 → dumphfdl subprocess.
 
 One ``BandPipeline`` is responsible for one HFDL band:
 
   - Registers the band as a channel on a shared ka9q ``MultiStream``.
   - Spawns one ``dumphfdl --iq-file -`` subprocess.
   - Forwards float32 IQ samples (delivered via ``on_samples``) to the
-    subprocess's stdin as interleaved CS16 (signed 16-bit complex).
+    subprocess's stdin as interleaved CF32 (32-bit float complex, LE).
   - Writes dumphfdl's stderr to a per-band log file.
   - Restarts the subprocess on exit with exponential backoff (cap 60 s);
     a successful run of >= ``MIN_RUN_SEC`` resets the backoff.
@@ -203,7 +203,7 @@ class BandPipeline:
         argv: list[str] = [
             dumphfdl,
             "--iq-file", "-",
-            "--sample-format", "cs16",
+            "--sample-format", "cf32",
             "--sample-rate", str(self._band.samprate_hz),
             "--centerfreq", center_khz,
         ]
@@ -251,7 +251,7 @@ class BandPipeline:
                 return
             stdin = proc.stdin
         try:
-            blob = _f32_iq_to_cs16(samples)
+            blob = _f32_iq_to_cf32(samples)
             stdin.write(blob)
             self._bytes_written += len(blob)
         except (BrokenPipeError, OSError) as e:
@@ -265,13 +265,13 @@ class BandPipeline:
         logger.info("%s: ka9q-radio stream restored", self._band.name)
 
 
-def _f32_iq_to_cs16(samples) -> bytes:
-    """Convert float32 IQ (complex64 or interleaved float32) → CS16 bytes.
+def _f32_iq_to_cf32(samples) -> bytes:
+    """Convert float32 IQ → CF32 bytes (interleaved float32 LE I/Q pairs).
 
-    ka9q-python delivers IQ in [-1.0, +1.0] (post f32le RTP parse). We
-    scale by 32767 and clip to the int16 range. ``np.nan_to_num`` zeros
-    out any NaN/Inf the resequencer may have inserted on a packet drop
-    so dumphfdl never sees a garbage sample.
+    dumphfdl's CF32 input is identical in layout to numpy ``complex64``:
+    interleaved float32 little-endian I,Q pairs. ``np.nan_to_num`` zeros
+    NaN/Inf the resequencer may have inserted on a packet drop so dumphfdl
+    never sees a garbage sample.
     """
     arr = np.asarray(samples)
     if arr.dtype == np.complex64:
@@ -281,5 +281,4 @@ def _f32_iq_to_cs16(samples) -> bytes:
     else:
         flat = arr.astype(np.float32, copy=False).ravel()
     flat = np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
-    cs16 = np.clip(flat * 32767.0, -32768.0, 32767.0).astype(np.int16)
-    return cs16.tobytes()
+    return np.ascontiguousarray(flat).tobytes()
