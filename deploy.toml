@@ -4,6 +4,16 @@ version          = "0.1.0"
 contract_version = "0.4"
 license          = "MIT"
 
+# Configuration interview (CONTRACT-v0.5 §14).  Sigmond invokes
+# hfdl-recorder's own argparse subcommands; both honor the §14.3 env
+# var bag (STATION_*, SIGMOND_INSTANCE, SIGMOND_RADIOD_STATUS) as
+# defaults.  station_id is composed from STATION_CALL plus a
+# numeric suffix derived from SIGMOND_INSTANCE for airframes.io
+# registration uniqueness.
+[contract.config]
+init = ["/usr/local/bin/hfdl-recorder", "config", "init"]
+edit = ["/usr/local/bin/hfdl-recorder", "config", "edit"]
+
 [build]
 steps = [
     "python3 -m venv /opt/hfdl-recorder/venv",
