@@ -30,7 +30,7 @@ def _find_template() -> Optional[Path]:
     candidates = [
         Path(__file__).resolve().parent.parent.parent
             / "config" / "hfdl-recorder-config.toml.template",
-        Path("/opt/git/hfdl-recorder/config/hfdl-recorder-config.toml.template"),
+        Path("/opt/git/sigmond/hfdl-recorder/config/hfdl-recorder-config.toml.template"),
         Path("/usr/local/share/hfdl-recorder/hfdl-recorder-config.toml.template"),
     ]
     for p in candidates:

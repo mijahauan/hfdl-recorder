@@ -148,7 +148,7 @@ hfdl-recorder implements the HamSCI client contract v0.4 as defined in
 - Per-band logs: `/var/log/hfdl-recorder/<radiod_id>-<BAND>.log` (dumphfdl stderr)
 - Process log: `/var/log/hfdl-recorder/<radiod_id>.log`
 - Venv: `/opt/hfdl-recorder/venv`
-- Source: `/opt/git/hfdl-recorder` (editable install)
+- Source: `/opt/git/sigmond/hfdl-recorder` (editable install)
 - dumphfdl binary: `/opt/hfdl-recorder/bin/dumphfdl`
 - Service user: `hfdlrec:hfdlrec`
 

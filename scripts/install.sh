@@ -5,7 +5,7 @@
 #
 # What it does:
 #   1. Creates service user hfdlrec:hfdlrec
-#   2. Clones/links repo to /opt/git/hfdl-recorder
+#   2. Clones/links repo to /opt/git/sigmond/hfdl-recorder
 #   3. Creates venv at /opt/hfdl-recorder/venv with editable install
 #   4. Builds libacars + dumphfdl into /opt/hfdl-recorder/bin
 #      (skip with --no-build if dumphfdl is already on disk)
@@ -20,7 +20,7 @@ set -euo pipefail
 
 SERVICE_USER="hfdlrec"
 SERVICE_GROUP="hfdlrec"
-REPO_SOURCE="/opt/git/hfdl-recorder"
+REPO_SOURCE="/opt/git/sigmond/hfdl-recorder"
 PREFIX="/opt/hfdl-recorder"
 VENV_DIR="${PREFIX}/venv"
 CONFIG_DIR="/etc/hfdl-recorder"
@@ -69,7 +69,7 @@ fi
 # Traversability check (Pattern A defense)
 if ! sudo -u "$SERVICE_USER" test -r "$REPO_SOURCE/src/hfdl_recorder/__init__.py"; then
     ui_error "Service user $SERVICE_USER cannot read $REPO_SOURCE/src/hfdl_recorder/__init__.py"
-    ui_error "Fix: ensure the repo is at /opt/git/hfdl-recorder (not under a mode-700 home)"
+    ui_error "Fix: ensure the repo is at /opt/git/sigmond/hfdl-recorder (not under a mode-700 home)"
     ui_error "  or: chmod g+rx the path and add $SERVICE_USER to the owner's group"
     exit 1
 fi
