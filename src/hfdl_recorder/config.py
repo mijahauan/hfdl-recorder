@@ -57,34 +57,109 @@ def load_config(path: Path | None = None) -> dict:
     return raw
 
 
+# Default HFDL band selection used for synthesized [[radiod]] blocks
+# (matches the curated set in the config template).
+_DEFAULT_HFDL_BANDS = [
+    "HFDL21", "HFDL13", "HFDL11", "HFDL10", "HFDL8", "HFDL6", "HFDL5",
+]
+
+# Where ka9q-radio keeps its per-instance conf files.  When hfdl-recorder
+# can't find a [[radiod]] block in its own config, this is the canonical
+# source of truth for the radiod's status DNS — same approach
+# wsprdaemon-client uses (see lib/wdlib/v4_parser.py).
+_RADIOD_CONF_DIR = Path("/etc/radio")
+
+
+def _read_status_from_radiod_conf(conf_path: Path) -> str | None:
+    """Return the `status =` value from a radiod conf, or None on miss."""
+    try:
+        for raw in conf_path.read_text().splitlines():
+            line = raw.strip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            if key.strip() == "status":
+                # Strip trailing inline comments, quotes, and whitespace
+                val = val.split("#", 1)[0].strip().strip('"').strip("'")
+                return val or None
+    except OSError:
+        pass
+    return None
+
+
+def _synthesize_radiod_block_from_conf(radiod_id: str) -> dict | None:
+    """Build a minimal [[radiod]] block from /etc/radio/radiod@<id>.conf.
+
+    Returns None if the conf doesn't exist or doesn't name a status DNS.
+    The synthesized block uses the curated default band list — operators
+    who want a different set should declare an explicit [[radiod]] block.
+    """
+    conf = _RADIOD_CONF_DIR / f"radiod@{radiod_id}.conf"
+    if not conf.exists():
+        return None
+    status = _read_status_from_radiod_conf(conf)
+    if not status:
+        return None
+    return {
+        "id":            radiod_id,
+        "radiod_status": status,
+        "bands":         {"enabled": list(_DEFAULT_HFDL_BANDS)},
+        "_source":       f"synthesized from {conf}",
+    }
+
+
 def resolve_radiod_block(config: dict, radiod_id: str | None) -> dict:
     """Find the [[radiod]] block matching radiod_id.
 
-    If radiod_id is None, the config must contain exactly one [[radiod]].
+    Resolution order:
+      1. Match an explicit [[radiod]] block in the config.
+      2. If no match (or no blocks at all) and /etc/radio/radiod@<id>.conf
+         exists locally, synthesize a block from the conf's `status =` line.
+         This matches the wsprdaemon-client convention: the radiod conf is
+         the canonical source of truth for the status DNS, so operators
+         shouldn't have to duplicate it in hfdl-recorder's config.
+      3. If radiod_id is None and exactly one /etc/radio/radiod@*.conf
+         exists, autodetect that one.
     """
     radiod_blocks = config.get("radiod", [])
     if isinstance(radiod_blocks, dict):
         radiod_blocks = [radiod_blocks]
 
-    if not radiod_blocks:
-        raise ValueError("Config contains no [[radiod]] blocks")
+    # Explicit match first
+    if radiod_id is not None:
+        for block in radiod_blocks:
+            if block.get("id") == radiod_id:
+                return block
+        # Fall through to filesystem
+        synth = _synthesize_radiod_block_from_conf(radiod_id)
+        if synth is not None:
+            return synth
+        available = [b.get("id", "<unnamed>") for b in radiod_blocks]
+        raise ValueError(
+            f"No [[radiod]] block with id={radiod_id!r} in config and "
+            f"no /etc/radio/radiod@{radiod_id}.conf on disk. "
+            f"Config blocks: {available or ['(none)']}."
+        )
 
-    if radiod_id is None:
-        if len(radiod_blocks) != 1:
-            raise ValueError(
-                f"--radiod-id required: config has {len(radiod_blocks)} "
-                f"[[radiod]] blocks"
-            )
+    # radiod_id is None → either pick the one config block, or autodetect
+    # from the filesystem when the config has no blocks.
+    if len(radiod_blocks) == 1:
         return radiod_blocks[0]
-
-    for block in radiod_blocks:
-        if block.get("id") == radiod_id:
-            return block
-
-    available = [b.get("id", "<unnamed>") for b in radiod_blocks]
+    if not radiod_blocks and _RADIOD_CONF_DIR.is_dir():
+        confs = sorted(_RADIOD_CONF_DIR.glob("radiod@*.conf"))
+        if len(confs) == 1:
+            only_id = confs[0].stem.split("@", 1)[1]
+            synth = _synthesize_radiod_block_from_conf(only_id)
+            if synth is not None:
+                return synth
+    if not radiod_blocks:
+        raise ValueError(
+            "Config has no [[radiod]] blocks and "
+            f"no unambiguous local radiod conf in {_RADIOD_CONF_DIR}"
+        )
     raise ValueError(
-        f"No [[radiod]] block with id={radiod_id!r}. "
-        f"Available: {', '.join(available)}"
+        f"--radiod-id required: config has {len(radiod_blocks)} "
+        f"[[radiod]] blocks"
     )
 
 
