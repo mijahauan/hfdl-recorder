@@ -55,7 +55,8 @@ owner = "hfdlrec:hfdlrec"
 mode  = "0755"
 
 [systemd]
-units = ["hfdl-recorder@.service"]
+units = []
+templated_units = ["hfdl-recorder@.service"]
 
 [deps]
 [[deps.binary]]
